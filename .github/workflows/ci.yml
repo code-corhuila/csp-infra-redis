@@ -1,0 +1,49 @@
+name: CI
+
+# The instance must start from nothing, reject the default user, keep auth_app inside its three key prefixes and
+# its short list of commands, write nothing to disk, publish no port and survive being started again (ADR-028).
+
+on:
+  pull_request:
+    branches: [develop, qa, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  instance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      COMPOSE_PROJECT_NAME: csp-ci-redis
+      REDIS_ADMIN_PASSWORD: ci-admin-password
+      AUTH_REDIS_PASSWORD: ci-auth-password
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the shell scripts
+        run: for f in scripts/*.sh tests/*.sh; do sh -n "$f"; done
+
+      - name: Validate the composition
+        run: |
+          docker network create platform
+          docker compose config --quiet
+
+      - name: Start the instance
+        run: docker compose up -d --wait redis
+
+      - name: Check users, permissions, persistence, port and restart
+        run: sh tests/instance.sh
+
+      - name: Show the log when a step failed
+        if: failure()
+        run: docker compose logs redis
+
+      - name: Clean up
+        if: always()
+        run: docker compose down -v
