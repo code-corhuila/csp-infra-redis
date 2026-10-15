@@ -5,6 +5,8 @@ All notable changes of `csp-infra-redis` are recorded here. The format follows
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-15
+
 ### Added
 
 - The single Redis instance of the platform for the auth state (ADR-028): `compose.yml` with the pinned image
