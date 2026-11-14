@@ -1,0 +1,50 @@
+# The single Redis instance of the platform (ADR-028): the state of auth that must expire by itself (login attempt
+# counters, temporary locks and revoked jti). The project name comes from COMPOSE_PROJECT_NAME of the env file
+# (csp-dev, csp-qa, csp-main), so every environment has its own container (J.5.1).
+services:
+  redis:
+    image: redis:7.4.11-alpine
+    # The ACL file is rebuilt at every start from the environment, never stored in the repository. The template holds
+    # the users and their permissions (the ACL format accepts no comments, so they are dropped); the passwords enter
+    # only as SHA-256 hashes and the result lives inside the container.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -eu
+        admin_hash=$$(printf '%s' "$$REDIS_ADMIN_PASSWORD" | sha256sum | cut -d' ' -f1)
+        auth_hash=$$(printf '%s' "$$AUTH_REDIS_PASSWORD" | sha256sum | cut -d' ' -f1)
+        sed -e '/^#/d' -e "s/@REDIS_ADMIN_SHA256@/$$admin_hash/" -e "s/@AUTH_SHA256@/$$auth_hash/" \
+          /etc/redis/users.acl.template > /etc/redis/users.acl
+        chown redis:redis /etc/redis/users.acl
+        chmod 400 /etc/redis/users.acl
+        # The protection is the ACL (default off) and the unpublished port, not the network binding.
+        exec docker-entrypoint.sh redis-server --aclfile /etc/redis/users.acl --protected-mode no \
+          --save "" --appendonly no \
+          --maxmemory "$$REDIS_MAXMEMORY" --maxmemory-policy volatile-ttl
+    environment:
+      REDIS_ADMIN_PASSWORD: ${REDIS_ADMIN_PASSWORD:?set REDIS_ADMIN_PASSWORD}
+      AUTH_REDIS_PASSWORD: ${AUTH_REDIS_PASSWORD:?set AUTH_REDIS_PASSWORD}
+      REDIS_MAXMEMORY: ${REDIS_MAXMEMORY:-64mb}
+    volumes:
+      - ./redis/users.acl.template:/etc/redis/users.acl.template:ro
+    # No volume: the instance keeps nothing on disk. The image declares /data as a volume, so it is mounted as tmpfs
+    # to stop Docker from creating an anonymous one. A restart empties the instance on purpose (ADR-028).
+    tmpfs:
+      - /data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - REDISCLI_AUTH="$$REDIS_ADMIN_PASSWORD" redis-cli --user redis_admin ping | grep -q PONG
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    # expose, not ports: only the gateway is reachable from the host.
+    expose: ["6379"]
+    networks: [platform]
+
+networks:
+  platform:
+    name: platform
+    external: true

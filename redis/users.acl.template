@@ -1,0 +1,8 @@
+# ACL of the Redis instance. compose.yml fills the two placeholders with the SHA-256 of each password at every start
+# and writes the result inside the container: this template carries no secret and the real file is never versioned.
+# The default user is off, so nothing can connect without a named user.
+user default off
+# Operation and the container health check only. No service connects with it.
+user redis_admin on #@REDIS_ADMIN_SHA256@ ~* &* +@all
+# csp-auth-api (ADR-028): the counters of login attempts, the temporary locks and the revoked jti, nothing else.
+user auth_app on #@AUTH_SHA256@ ~attempts:* ~locked:* ~blacklist:* -@all +get +set +exists +incr +expire +ttl +del +ping
